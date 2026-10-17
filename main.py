@@ -50,14 +50,13 @@ class DuelView(discord.ui.View):
         for child in self.children:
             child.disabled = True
         
-        # Track duel result logic here if needed
         data = load_data()
         challenger_id = str(self.challenger.id)
         opponent_id = str(self.opponent.id)
         
         for uid in [challenger_id, opponent_id]:
             if uid not in data["duel_data"]["duel_stats"]:
-                data["duel_stats"][uid] = {"wins": 0, "losses": 0}
+                data["duel_data"]["duel_stats"][uid] = {"wins": 0, "losses": 0}
         
         save_data(data)
 
@@ -84,8 +83,51 @@ class RogueBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        self.update_leaderboards_loop.start()
+        if not self.update_leaderboards_loop.is_running():
+            self.update_leaderboards_loop.start()
         print("Slash commands synced and leaderboard loop started.")
+
+    @tasks.loop(minutes=5)
+    async def update_leaderboards_loop(self):
+        data = load_data()
+        for guild in self.guilds:
+            kd_channel = discord.utils.get(guild.text_channels, name="kd-leaderboard")
+            duel_channel = discord.utils.get(guild.text_channels, name="1v1-leaderboard")
+            
+            if kd_channel:
+                sorted_kills = sorted(data["kill_counts"].items(), key=lambda x: x[1].get("kills", 0), reverse=True)[:5]
+                embed = discord.Embed(title="Global Kill Leaderboard", color=discord.Color.gold())
+                desc = ""
+                for idx, (ald_key, stats) in enumerate(sorted_kills, 1):
+                    kills = stats.get("kills", 0)
+                    deaths = stats.get("deaths", 0)
+                    kd = kills if deaths == 0 else round(kills / deaths, 2)
+                    desc += f"{idx}. {ald_key.replace('alderon:', '')} — Kills: {kills} · Deaths: {deaths} · K/D: {kd}\n"
+                
+                if not desc:
+                    desc = "No recorded kills yet."
+                embed.description = desc
+                embed.set_footer(text="Auto-updating global kill leaderboard")
+                
+            if duel_channel:
+                sorted_duels = sorted(data["duel_data"]["duel_stats"].items(), key=lambda x: x[1].get("wins", 0), reverse=True)[:5]
+                embed_duel = discord.Embed(title="1v1 Duel Leaderboard", color=discord.Color.blurple())
+                desc_duel = ""
+                for idx, (uid, stats) in enumerate(sorted_duels, 1):
+                    wins = stats.get("wins", 0)
+                    losses = stats.get("losses", 0)
+                    total = wins + losses
+                    winrate = round((wins / total) * 100, 1) if total > 0 else 0.0
+                    desc_duel += f"{idx}. <@{uid}> — Wins: {wins} · Losses: {losses} · Win rate: {winrate}%\n"
+                    
+                if not desc_duel:
+                    desc_duel = "No recorded duels yet."
+                embed_duel.description = desc_duel
+                embed_duel.set_footer(text="Auto-updating 1v1 wins, losses, and win rates")
+
+    @update_leaderboards_loop.before_loop
+    async def before_leaderboards(self):
+        await self.wait_until_ready()
 
 bot = RogueBot()
 
@@ -152,56 +194,9 @@ async def duel(interaction: discord.Interaction, member: discord.Member):
     embed = discord.Embed(title="⚔️ Duel Challenge", color=discord.Color.gold())
     embed.add_field(name="Challenger", value=interaction.user.mention, inline=True)
     embed.add_field(name="Opponent", value=member.mention, inline=True)
-    embed.description = f"Status: Waiting for {member.mention} to respond.\nOnly {member.mention} can respond[span_0](start_span)[span_0](end_span)."
+    embed.description = f"Status: Waiting for {member.mention} to respond.\nOnly {member.mention} can respond."
 
     await interaction.response.send_message(content=member.mention, embed=embed, view=view)
-
-@tasks.loop(minutes=5)
-async def update_leaderboards_loop():
-    # Background loop to handle auto-updating leaderboards if channel names match
-    data = load_data()
-    for guild in bot.guilds:
-        kd_channel = discord.utils.get(guild.text_channels, name="kd-leaderboard")
-        duel_channel = discord.utils.get(guild.text_channels, name="1v1-leaderboard")
-        
-        # Build K/D Leaderboard embed text
-        if kd_channel:
-            sorted_kills = sorted(data["kill_counts"].items(), key=lambda x: x[1].get("kills", 0), reverse=True)[:5]
-            embed = discord.Embed(title="Global Kill Leaderboard", color=discord.Color.gold())
-            desc = ""
-            for idx, (ald_key, stats) in enumerate(sorted_kills, 1):
-                kills = stats.get("kills", 0)
-                deaths = stats.get("deaths", 0)
-                kd = kills if deaths == 0 else round(kills / deaths, 2)
-                desc += f"{idx}. {ald_key.replace('alderon:', '')} — Kills: {kills} · Deaths: {deaths} · K/D: {kd}\n"
-            
-            if not desc:
-                desc = "No recorded kills yet."
-            embed.description = desc
-            embed.set_footer(text="Auto-updating global kill leaderboard")
-            
-            # Simple purge & post logic or edit last bot message could go here
-            
-        # Build 1v1 Leaderboard embed text
-        if duel_channel:
-            sorted_duels = sorted(data["duel_stats"].items(), key=lambda x: x[1].get("wins", 0), reverse=True)[:5]
-            embed_duel = discord.Embed(title="1v1 Duel Leaderboard", color=discord.Color.blurple())
-            desc_duel = ""
-            for idx, (uid, stats) in enumerate(sorted_duels, 1):
-                wins = stats.get("wins", 0)
-                losses = stats.get("losses", 0)
-                total = wins + losses
-                winrate = round((wins / total) * 100, 1) if total > 0 else 0.0
-                desc_duel += f"{idx}. <@{uid}> — Wins: {wins} · Losses: {losses} · Win rate: {winrate}%\n"
-                
-            if not desc_duel:
-                desc_duel = "No recorded duels yet."
-            embed_duel.description = desc_duel
-            embed_duel.set_footer(text="Auto-updating 1v1 wins, losses, and win rates")
-
-@update_leaderboards_loop.before_loop
-async def before_leaderboards():
-    await bot.wait_until_ready()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 if TOKEN:
