@@ -107,8 +107,16 @@ class RogueBot(commands.Bot):
                 if not desc:
                     desc = "No recorded kills yet."
                 embed.description = desc
-                embed.set_footer(text="Auto-updating global kill leaderboard")
-                
+                embed.set_footer(text="Auto-updating global kill leaderboard") 
+                                    message_edited = False
+                    async for message in kd_channel.history(limit=10):
+                        if message.author == self.user:
+                            await message.edit(embed=embed)
+                            message_edited = True
+                            break
+                    if not message_edited:
+                        await kd_channel.send(embed=embed)
+                        
             if duel_channel:
                 sorted_duels = sorted(data["duel_data"]["duel_stats"].items(), key=lambda x: x[1].get("wins", 0), reverse=True)[:5]
                 embed_duel = discord.Embed(title="1v1 Duel Leaderboard", color=discord.Color.blurple())
@@ -124,7 +132,15 @@ class RogueBot(commands.Bot):
                     desc_duel = "No recorded duels yet."
                 embed_duel.description = desc_duel
                 embed_duel.set_footer(text="Auto-updating 1v1 wins, losses, and win rates")
-
+                             duel_edited = False
+                    async for message in duel_channel.history(limit=10):
+                        if message.author == self.user:
+                            await message.edit(embed=embed_duel)
+                            duel_edited = True
+                            break
+                    if not duel_edited:
+                        await duel_channel.send(embed=embed_duel)
+        
     @update_leaderboards_loop.before_loop
     async def before_leaderboards(self):
         await self.wait_until_ready()
